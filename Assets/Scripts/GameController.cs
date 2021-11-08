@@ -31,15 +31,15 @@ public class GameController : SingleTone<GameController>
     public MessageBoxController MessageBox;
 
 
-    GameStatus currentGameStatus;
+    private GameStatus currentGameStatus;
     public GameStatus CurrentGameStatus
     {
         get { return currentGameStatus; }
     }
 
-    private List<CardItem> ListCardsPrefab = new List<CardItem>();
-    private List<CardItem> ListCardsOnTable = new List<CardItem>();
-    private List<CardObjectController> ListCardsObjOnTable = new List<CardObjectController>();
+    private List<CardItem> ListCardsPrefab; //all scriptable cards in recources folder
+    private List<CardItem> ListCardsOnTable; //current list scriptable objects on game table
+    private List<CardObjectController> ListCardsObjOnTable; //current list of cards scripts controller
     private GameObject[] openedCards = new GameObject[2];
     private int numberOfCardsInDB = 0;
     private int currentScore = 0;
@@ -47,40 +47,36 @@ public class GameController : SingleTone<GameController>
     private void Awake()
     {
         currentGameStatus = GameStatus.TimerCountDown;
-        string[] cardsObjPaths;
-        try
-        {
-            cardsObjPaths = Directory.GetFiles("Assets/Resources/ScriptableObjects/CardsData", "*.asset");
-            numberOfCardsInDB = cardsObjPaths.Length;
-
-            if (numberOfCardsInDB < CARDSTYPEONTABLE)
-                throw new Exception("Not enough cards in the database");
-
-            //Load recources in scriptable objects
-            for (int i = 0; i < numberOfCardsInDB; i++)
-            {
-                cardsObjPaths[i] = Path.GetFileNameWithoutExtension(cardsObjPaths[i]);
-                ListCardsPrefab.Add(Resources.Load<CardItem>("ScriptableObjects/CardsData/" + cardsObjPaths[i]));
-            }
-
-        }
-        catch (Exception ex)
-        {
-            Debug.Log(ex.Message);
-            currentGameStatus = GameStatus.LoadError;
-        }
+        ListCardsPrefab = LoadScriptableObjectsFromRecources();
     }
 
     private void Start()
     {
-        if (currentGameStatus == GameStatus.LoadError)
-            return;
-
-        CardItem[] masCardsPrefab = ListCardsPrefab.ToArray();
         ScoreText.text = "SCORE: " + currentScore.ToString();
         MessageBox.HideMessageBox();
 
-        // select 8 random cards from the database (if there are more than 8)
+        if (currentGameStatus == GameStatus.LoadError)
+            return;
+
+        ListCardsOnTable = CreateCardsListForGame(ListCardsPrefab);
+
+        //Clear CardsContainer default icons
+        foreach (Transform item in CardsContainer.transform)
+        {
+            Destroy(item.gameObject);
+        }
+
+        ListCardsObjOnTable = PlaceCardsToUI(ListCardsOnTable);
+
+        StartCoroutine(StartTimerForShowingAllCards());
+    }
+
+    private List<CardItem> CreateCardsListForGame(List<CardItem> list)
+    {
+        CardItem[] masCardsPrefab = list.ToArray();
+        List<CardItem> listCardsOnTable = new List<CardItem>();
+
+        // select 8 random cards from the scriptable database (if there are more than 8)
         for (int i = 0; i < CARDSTYPEONTABLE; i++)
         {
             int randNum = Random.Range(0, numberOfCardsInDB);
@@ -91,49 +87,70 @@ public class GameController : SingleTone<GameController>
                 if (randNum >= numberOfCardsInDB) randNum = 0;
             }
 
-            ListCardsOnTable.Add(masCardsPrefab[randNum]);//added 2 cards
-            ListCardsOnTable.Add(masCardsPrefab[randNum]);
+            listCardsOnTable.Add(masCardsPrefab[randNum]);//added 2 cards
+            listCardsOnTable.Add(masCardsPrefab[randNum]);
 
             masCardsPrefab[randNum] = null;
         }
 
-
         //shuffle the cards on the table
-        for (int i = 0; i < CARDSONTABLE * 2; i++)
+        for (int i = 0; i < CARDSONTABLE * 3; i++)
         {
-            int randIndex1 = Random.Range(0, ListCardsOnTable.Count);
-            int randIndex2 = Random.Range(0, ListCardsOnTable.Count);
+            int randIndex1 = Random.Range(0, listCardsOnTable.Count);
+            int randIndex2 = Random.Range(0, listCardsOnTable.Count);
 
-            CardItem card = ListCardsOnTable[randIndex1];
-            ListCardsOnTable[randIndex1] = ListCardsOnTable[randIndex2];
-            ListCardsOnTable[randIndex2] = card;
+            CardItem card = listCardsOnTable[randIndex1];
+            listCardsOnTable[randIndex1] = listCardsOnTable[randIndex2];
+            listCardsOnTable[randIndex2] = card;
         }
-
-        //Clear CardsContainer default icons
-        foreach (Transform item in CardsContainer.transform)
-        {
-            Destroy(item.gameObject);
-        }
-
-        PlaceCardsToUI();
-
-        StartCoroutine(StartTimerShowingAllCards());
+        return listCardsOnTable;
     }
 
-    private void PlaceCardsToUI()
+    private List<CardItem> LoadScriptableObjectsFromRecources()
     {
-        foreach (CardItem card in ListCardsOnTable)
+        try
+        {
+            List<CardItem> listCardsPrefab = new List<CardItem>();
+
+            UnityEngine.Object[] cardsNames = Resources.LoadAll("ScriptableObjects/CardsData", typeof(CardItem));
+            numberOfCardsInDB = cardsNames.Length;
+
+            if (numberOfCardsInDB < CARDSTYPEONTABLE)
+                throw new Exception("Not enough cards in the database");
+
+            //Load recources in scriptable objects
+            for (int i = 0; i < numberOfCardsInDB; i++)
+            {
+                listCardsPrefab.Add(Resources.Load<CardItem>("ScriptableObjects/CardsData/" + cardsNames[i].name));
+            }
+            return listCardsPrefab;
+
+        }
+        catch (Exception ex)
+        {
+            Debug.Log(ex.Message);
+            MessageBox.ShowMessage(ex.Message);
+            currentGameStatus = GameStatus.LoadError;
+            return null;
+        }
+    }
+
+    private List<CardObjectController> PlaceCardsToUI(List<CardItem> listCardsOnTable)
+    {
+        List<CardObjectController> listCardsObjOnTable = new List<CardObjectController>();
+        foreach (CardItem card in listCardsOnTable)
         {
             var uiIcon = new GameObject(card.IconName);
             uiIcon.transform.parent = CardsContainer.transform;
             CardObjectController cObj = uiIcon.AddComponent<CardObjectController>();
             cObj.SetIcons(ÑardBackIcon, card.Icon);
             cObj.SetScore(card.ScorePoints);
-            ListCardsObjOnTable.Add(cObj);
+            listCardsObjOnTable.Add(cObj);
         }
+        return listCardsObjOnTable;
     }
 
-    private IEnumerator StartTimerShowingAllCards()
+    private IEnumerator StartTimerForShowingAllCards()
     {
         int timer = SHOWCARDSTIME;
         TimerText.gameObject.SetActive(true);
@@ -168,7 +185,6 @@ public class GameController : SingleTone<GameController>
             currentGameStatus = GameStatus.TwoCardsOpen;
             openedCards[1] = go;
             StartCoroutine(OpenedTwoCards());
-
         }
     }
 
